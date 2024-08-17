@@ -23,16 +23,28 @@ const String topicsPart = '/topics';
 const String topicPart = '/topic';
 const String topTopicsPart = '/toptopics';
 
+/// Calculates the duration based on a power of 2.
+///
+/// Allows for exponential backoff.
 Duration _pow2Duration(int index) {
   return Duration(seconds: math.pow(2, index).toInt());
 }
 
 const String baseAPIPath = 'https://www.deviantart.com/api/v1/oauth2';
 
+/// Builds a path by joining the given list of [part]s with the base API path.
 String _buildPath({required List<String> parts}) {
   return '$baseAPIPath${parts.join()}';
 }
 
+/// Sends a GET request to the specified [path] using the provided [client].
+///
+/// Optional [params] and [headers] can be provided to include additional query parameters and headers in the request.
+/// The [accessTokenResetRetries] parameter specifies the number of times the access token can be reset before throwing a [MaxAccessTokenResetRetriesExceededException].
+///
+/// Returns a [Future] that resolves to an [http.Response] object.
+/// If the response status code is 401 (Unauthorized), the request will be retried with a new access token.
+/// The retry logic will be executed up to 3 times.
 a.Future<http.Response> _get(
     {required String path,
     required c.Client client,
@@ -72,8 +84,14 @@ a.Future<http.Response> _get(
   return resp;
 }
 
+/// Represents a noop callback that does not take any arguments.
 class NullCallbackArgs extends s.ResponseCallbackArgs {}
 
+/// Exception thrown when the maximum number of retries for resetting the access
+/// token is exceeded.
+///
+/// This exception is thrown when the client has attempted to reset the access
+/// token multiple times, but the maximum number of retries has been reached.
 class MaxAccessTokenResetRetriesExceededException implements Exception {
   final String message;
 
@@ -83,15 +101,40 @@ class MaxAccessTokenResetRetriesExceededException implements Exception {
   String toString() => 'MaxAccessTokenResetRetriesExceededException: $message';
 }
 
+/// An abstract base class for requests.
+///
+/// This class represents a base class for requests in the DeviantArt client
+/// library. It provides common functionality and properties that are shared by
+/// all requests. Subclasses of this class should implement the `send` method
+/// and provide the necessary implementation details specific to each request.
+///
+/// The type parameters [R] and [T] represent the response type and callback
+/// arguments type respectively. The [R] type must extend `ResponseBase` and the
+/// [T] type must extend [s.ResponseCallbackArgs].
+///
+/// The [callback] parameter is a function that will be called when the request
+/// is completed. It takes an argument of type [T], which represents the
+/// callback arguments.
 abstract class RequestBase<R extends res.ResponseBase,
     T extends s.ResponseCallbackArgs> {
+  /// A callback function that takes a parameter of type [T] representing the
+  /// callback arguments type.
   final void Function(T) callback;
-  a.Future<R> send({required c.Client client});
-  Map<String, String> get _params;
 
+  /// Base class for constructor for requests.
+  ///
+  /// This class is used as a blueprint for creating request objects. It
+  /// contains a required [callback] parameter that represents the callback
+  /// function to be executed when the request is completed.
   RequestBase({required this.callback});
+
+  /// Sends a request using the specified [client].
+  a.Future<R> send({required c.Client client});
+
+  Map<String, String> get _params;
 }
 
+/// Represents a request to retrieve daily data from the server.
 class DailyRequest extends RequestBase<res.BrowseResponse, NullCallbackArgs>
     with eq.EquatableMixin {
   final DateTime date;
@@ -106,9 +149,14 @@ class DailyRequest extends RequestBase<res.BrowseResponse, NullCallbackArgs>
   String get month => '${date.month}'.padLeft(2, '0');
   String get day => '${date.day}'.padLeft(2, '0');
 
+  /// Returns a map that contains a single entry with the key 'date' and the
+  /// value formatted as '$year-$month-$day'.
   @override
   Map<String, String> get _params => {'date': '$year-$month-$day'};
 
+  /// Sends a request to browse and retrieve the response.
+  ///
+  /// It requires a [client] parameter to make the HTTP request.
   @override
   a.Future<res.BrowseResponse> send({required c.Client client}) async {
     http.Response resp = await _get(
@@ -122,12 +170,21 @@ class DailyRequest extends RequestBase<res.BrowseResponse, NullCallbackArgs>
     );
   }
 
+  /// Creates a daily request.
+  ///
+  /// This class is used to make a request for a specific date. [date] specifies
+  /// the date for which the request is made. [callback] is the callback
+  /// function to be executed when the request is completed.
   DailyRequest({
     required this.date,
     required super.callback,
   });
 }
 
+/// An abstract class representing a request for offset and limit pagination.
+///
+/// This class is used as a base class for requests that require pagination
+/// using offset and limit parameters.
 abstract class _OffsetLimitPaginatorRequest<R extends res.ResponseBase,
         T extends s.ResponseCallbackArgs> extends RequestBase<R, T>
     with eq.EquatableMixin {
@@ -143,6 +200,13 @@ abstract class _OffsetLimitPaginatorRequest<R extends res.ResponseBase,
         'limit': '$_limit',
       };
 
+  /// Represents a request for an offset-limit paginator.
+  ///
+  /// This request is used to specify the offset and limit for paginated data
+  /// retrieval. [offset] represents the starting index of the data to retrieve,
+  /// while the [limit] represents the maximum number of items to retrieve. The
+  /// [callback] parameter is a required callback function that will be called
+  /// when the request is executed.
   _OffsetLimitPaginatorRequest({
     required int offset,
     required int limit,
@@ -151,11 +215,19 @@ abstract class _OffsetLimitPaginatorRequest<R extends res.ResponseBase,
         _limit = limit;
 }
 
+/// A class representing a popular request for browsing deviantart items.
+///
+/// This class extends the [_OffsetLimitPaginatorRequest] class.
 class PopularRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
     s.SingleDirectionPaginatorResponseMetadata> with eq.EquatableMixin {
+  /// The search query for the request.
   final String? _search;
+
+  /// The time range for the request.
   final s.TimeRange? _timeRange;
 
+  /// Converts a [s.TimeRange] enum value to its corresponding string
+  /// representation.
   static String _stringFromTimeRange(s.TimeRange timeRange) {
     switch (timeRange) {
       case s.TimeRange.now:
@@ -190,6 +262,11 @@ class PopularRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
     return params;
   }
 
+  /// Sends a browse request using the provided [client].
+  ///
+  /// This method sends a browse request to the server and returns a [Future]
+  /// that resolves to a [res.BrowseResponse] object. The [client] parameter is
+  /// required and should be an instance of [c.Client] from the [http] package.
   @override
   a.Future<res.BrowseResponse> send({required c.Client client}) async {
     http.Response resp = await _get(
@@ -204,6 +281,13 @@ class PopularRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
     return res.BrowseResponse.fromJSON(decoded: decoded['results']);
   }
 
+  /// Creates a new instance of [PopularRequest].
+  ///
+  /// [offset] and [limit] are required and specify the pagination offset and
+  /// limit for the request. [search] is optional and represents the search
+  /// query for the request. [timeRange] is optional and specifies the time
+  /// range for the request. [callback] is required and represents the callback
+  /// function to be called after the request is sent.
   PopularRequest(
       {required super.offset,
       required super.limit,
@@ -214,6 +298,7 @@ class PopularRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
         _timeRange = timeRange;
 }
 
+/// Request to retrieve the newest items.
 class NewestRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
     s.SingleDirectionPaginatorResponseMetadata> with eq.EquatableMixin {
   final String? _search;
@@ -224,6 +309,7 @@ class NewestRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
   @override
   bool get stringify => true;
 
+  /// Returns the parameters for the request.
   @override
   Map<String, String> get _params {
     Map<String, String> offsetLimitParams = super._params;
@@ -234,6 +320,10 @@ class NewestRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
       });
   }
 
+  /// Sends a request to browse the newest items.
+  ///
+  /// This method sends a request to browse the newest items using the provided
+  /// [client].
   @override
   a.Future<res.BrowseResponse> send({required c.Client client}) async {
     http.Response resp = await _get(
@@ -247,6 +337,13 @@ class NewestRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
     return res.BrowseResponse.fromJSON(decoded: decoded['results']);
   }
 
+  /// Creates a request for retrieving the newest items.
+  ///
+  /// [offset] and [limit] are required and specify the starting offset and the
+  /// maximum number of items to retrieve. [search] is optional and allows
+  /// filtering the items based on a search query. [callback] is required and
+  /// specifies the callback function to be called when the request is
+  /// completed.
   NewestRequest(
       {required super.offset,
       required super.limit,
@@ -255,19 +352,29 @@ class NewestRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
       : _search = search;
 }
 
+/// Request to browse tags.
+///
+/// This request is used to retrieve browse response for a specific tag.
 class TagsRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
     s.SingleDirectionPaginatorResponseMetadata> with eq.EquatableMixin {
+  /// The tag to browse.
   final String _tag;
 
+  /// Returns a list of objects that are used to determine equality of this
+  /// request.
   @override
   List<Object?> get props => super.props..addAll([_tag]);
 
+  /// Returns a map of query parameters for the request.
   @override
   Map<String, String> get _params => super._params
     ..addAll({
       'tag': _tag,
     });
 
+  /// Sends the request and returns a [res.BrowseResponse].
+  ///
+  /// The [client] parameter is required to send the request.
   @override
   a.Future<res.BrowseResponse> send({required c.Client client}) async {
     http.Response resp = await _get(
@@ -281,6 +388,11 @@ class TagsRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
     return res.BrowseResponse.fromJSON(decoded: decoded['results']);
   }
 
+  /// Creates a new instance of [TagsRequest].
+  ///
+  /// [offset] is the starting index of the browse request. [limit] is the
+  /// maximum number of results to retrieve. The [tag] is the tag to browse. The
+  /// [callback] is a function that will be called with the response metadata.
   TagsRequest(
       {required super.offset,
       required super.limit,
@@ -289,6 +401,98 @@ class TagsRequest extends _OffsetLimitPaginatorRequest<res.BrowseResponse,
       : _tag = tag;
 }
 
+/// Request to list topics.
+class ListTopicsRequest extends _OffsetLimitPaginatorRequest<
+    res.ListTopicsResponse,
+    s.SingleDirectionPaginatorResponseMetadata> with eq.EquatableMixin {
+  @override
+  bool get stringify => true;
+
+  /// Sends a request to list topics.
+  ///
+  /// This method sends a request to list topics using the provided [client]. It
+  /// returns a future that completes with a [res.ListTopicsResponse] object.
+  ///
+  /// The [client] parameter is required and represents the HTTP client to use
+  /// for the request.
+  @override
+  a.Future<res.ListTopicsResponse> send({required c.Client client}) async {
+    http.Response resp = await _get(
+        path: _buildPath(parts: [browsePart, topicsPart]),
+        client: client,
+        params: _params);
+    Map<String, dynamic> decoded = convert.json.decode(resp.body);
+    callback(
+        s.SingleDirectionPaginatorResponseMetadata.fromJSON(decoded: decoded));
+    return res.ListTopicsResponse.fromJSON(decoded: decoded['results']);
+  }
+
+  /// Create a request to list topics.
+  ListTopicsRequest({
+    required super.offset,
+    required super.limit,
+    required super.callback,
+  });
+}
+
+/// Request to browse a specific topic.
+class BrowseTopicRequest extends _OffsetLimitPaginatorRequest<
+    res.BrowseResponse,
+    s.SingleDirectionPaginatorResponseMetadata> with eq.EquatableMixin {
+  final String _name;
+
+  @override
+  List<Object?> get props => super.props..addAll([_name]);
+
+  @override
+  bool get stringify => true;
+
+  @override
+  Map<String, String> get _params => super._params..addAll({'topic': _name});
+
+  /// Sends a request to browse and returns a future that resolves to a
+  /// [res.BrowseResponse].
+  ///
+  /// The [client] parameter is required and represents the HTTP client used to
+  /// send the request. This method performs an HTTP GET request to the
+  /// specified path, with the necessary parameters. The response is then
+  /// decoded from JSON and used to create a [res.BrowseResponse] object.
+  /// Additionally, the [callback] function is called with the response
+  /// metadata.
+  @override
+  a.Future<res.BrowseResponse> send({required c.Client client}) async {
+    http.Response resp = await _get(
+      path: _buildPath(parts: [browsePart, topicPart]),
+      client: client,
+      params: _params,
+    );
+    Map<String, dynamic> decoded = convert.json.decode(resp.body);
+    callback(
+        s.SingleDirectionPaginatorResponseMetadata.fromJSON(decoded: decoded));
+    return res.BrowseResponse.fromJSON(decoded: decoded['results']);
+  }
+
+  /// Request to browse a specific topic.
+  ///
+  /// The [offset] and [limit] parameters determine the range of items to be
+  /// retrieved. The [callback] parameter is a function that will be called when
+  /// the request is completed. The [name] parameter specifies the name of the
+  /// topic to browse.
+  BrowseTopicRequest({
+    required super.offset,
+    required super.limit,
+    required super.callback,
+    required String name,
+  }) : _name = name;
+}
+
+/// Represents a request to retrieve more items similar to a given seed.
+///
+/// The [MoreLikeThisRequest] requires a seed, which is a string used to
+/// identify the item for which similar items are requested. The [_params]
+/// getter returns a map of query parameters that will be included in the
+/// request URL. In this case, it includes the 'seed' parameter with the value
+/// of [_seed].
 class MoreLikeThisRequest
     extends RequestBase<res.MoreLikeThisResponse, NullCallbackArgs>
     with eq.EquatableMixin {
@@ -303,6 +507,10 @@ class MoreLikeThisRequest
   @override
   Map<String, String> get _params => {'seed': _seed};
 
+  /// Sends a equest to retrieve more like this response.
+  ///
+  /// The [client] parameter is required and represents the HTTP client to use
+  /// for the request.
   @override
   a.Future<res.MoreLikeThisResponse> send({required c.Client client}) async {
     http.Response resp = await _get(
@@ -321,10 +529,23 @@ class MoreLikeThisRequest
     );
   }
 
+  /// Represents a request for retrieving similar items based on a seed.
+  ///
+  /// The [MoreLikeThisRequest] class is used to construct a request for
+  /// retrieving items that are similar to a given seed. The seed is a string
+  /// that serves as the basis for finding similar items.
+  ///
+  /// The [callback] parameter is a required callback function that will be
+  /// invoked when the request is completed. It should accept the response data
+  /// as a parameter.
   MoreLikeThisRequest({required String seed, required super.callback})
       : _seed = seed;
 }
 
+/// Represents a request to search for tags.
+///
+/// It is used to perform a tag search request and retrieve the corresponding
+/// response.
 class TagSearchRequest
     extends RequestBase<res.TagSearchResponse, NullCallbackArgs>
     with eq.EquatableMixin {
@@ -336,13 +557,18 @@ class TagSearchRequest
   @override
   bool get stringify => true;
 
+  /// Returns the parameters for the request.
   @override
   Map<String, String> get _params => {
         'tag_name': _tag,
       };
 
+  /// Sends the request and returns the corresponding response.
+  ///
+  /// The [client] parameter is required and represents the HTTP client to use
+  /// for the request.
   @override
-  a.Future<res.TagSearchResponse> send({required c.Client client}) async {
+  Future<res.TagSearchResponse> send({required c.Client client}) async {
     http.Response resp = await _get(
         path: _buildPath(parts: [browsePart, tagsPart, searchPart]),
         client: client,
@@ -352,12 +578,20 @@ class TagSearchRequest
         decoded: convert.json.decode(resp.body)['results']);
   }
 
+  /// Creates a new instance of [TagSearchRequest].
+  ///
+  /// [tag] is required and represents the tag to search for. [callback] is
+  /// required and represents the callback function to be called after the
+  /// request is sent.
   TagSearchRequest({
     required String tag,
     required super.callback,
   }) : _tag = tag;
 }
 
+/// Represents a request to retrieve the top topics.
+///
+/// This request is used to fetch the top topics from the server.
 class TopTopicsRequest
     extends RequestBase<res.ListTopicsResponse, NullCallbackArgs>
     with eq.EquatableMixin {
@@ -367,9 +601,14 @@ class TopTopicsRequest
   @override
   bool get stringify => true;
 
+  /// Returns the parameters for the request.
   @override
   Map<String, String> get _params => {};
 
+  /// Sends the request to the server and returns the response.
+  ///
+  /// This method sends the request to the server using the provided [client] and
+  /// returns the response as a [res.ListTopicsResponse] object.
   @override
   a.Future<res.ListTopicsResponse> send({required c.Client client}) async {
     http.Response resp = await _get(
@@ -382,65 +621,8 @@ class TopTopicsRequest
     );
   }
 
+  /// Create a new instance of the [TopTopicsRequest] class.
+  ///
+  /// [callback] is the function to be called after the request is sent.
   TopTopicsRequest({required super.callback});
-}
-
-class ListTopicsRequest extends _OffsetLimitPaginatorRequest<
-    res.ListTopicsResponse,
-    s.SingleDirectionPaginatorResponseMetadata> with eq.EquatableMixin {
-  @override
-  bool get stringify => true;
-
-  @override
-  a.Future<res.ListTopicsResponse> send({required c.Client client}) async {
-    http.Response resp = await _get(
-        path: _buildPath(parts: [browsePart, topicsPart]),
-        client: client,
-        params: _params);
-    Map<String, dynamic> decoded = convert.json.decode(resp.body);
-    callback(
-        s.SingleDirectionPaginatorResponseMetadata.fromJSON(decoded: decoded));
-    return res.ListTopicsResponse.fromJSON(decoded: decoded['results']);
-  }
-
-  ListTopicsRequest({
-    required super.offset,
-    required super.limit,
-    required super.callback,
-  });
-}
-
-class BrowseTopicRequest extends _OffsetLimitPaginatorRequest<
-    res.BrowseResponse,
-    s.SingleDirectionPaginatorResponseMetadata> with eq.EquatableMixin {
-  final String _name;
-
-  @override
-  List<Object?> get props => super.props..addAll([_name]);
-
-  @override
-  bool get stringify => true;
-
-  @override
-  Map<String, String> get _params => super._params..addAll({'topic': _name});
-
-  @override
-  a.Future<res.BrowseResponse> send({required c.Client client}) async {
-    http.Response resp = await _get(
-      path: _buildPath(parts: [browsePart, topicPart]),
-      client: client,
-      params: _params,
-    );
-    Map<String, dynamic> decoded = convert.json.decode(resp.body);
-    callback(
-        s.SingleDirectionPaginatorResponseMetadata.fromJSON(decoded: decoded));
-    return res.BrowseResponse.fromJSON(decoded: decoded['results']);
-  }
-
-  BrowseTopicRequest({
-    required super.offset,
-    required super.limit,
-    required super.callback,
-    required String name,
-  }) : _name = name;
 }
